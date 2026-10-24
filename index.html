@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Air Guitar</title>
+    <link rel="stylesheet" href="style.css">
+  </head>
+  <body>
+    <main>
+      <h1>Air Guitar</h1>
+
+      <div class="video-wrap">
+        <canvas id="view" width="640" height="480"></canvas>
+        <div class="note-layer" id="noteLayer"></div>
+        <div class="empty" id="videoEmpty">
+          <p id="emptyText">Load samples, then start the camera.</p>
+        </div>
+      </div>
+
+      <div class="bar">
+        <button id="cameraButton">Start camera</button>
+        <label class="file-btn">
+          <span id="sampleBadge">Load samples</span>
+          <input id="sampleFiles" type="file" webkitdirectory multiple accept=".wav,audio/wav">
+        </label>
+        <label class="field">
+          Fretting hand
+          <select id="fretHand">
+            <option value="Right" selected>Right</option>
+            <option value="Left">Left</option>
+          </select>
+        </label>
+        <label class="field">
+          Strumming hand
+          <select id="strumHand">
+            <option value="Right">Right</option>
+            <option value="Left" selected>Left</option>
+          </select>
+        </label>
+        
+        <label class="field">
+  Strum sensitivity
+  <input type="range" id="sensitivity" min="1" max="9" value="5">
+</label>
+
+      </div>
+
+      <div class="bar info">
+        <div>Chord: <b id="chordName">none</b></div>
+        <div>Hands: <b id="handCount">0</b></div>
+        <div id="status">Loading samples…</div>
+      </div>
+
+      <div class="bar" id="chordButtons"></div>
+    </main>
+
+    <script src="script.js"></script>
+  </body>
+</html>
