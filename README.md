@@ -1,7 +1,9 @@
 Air Guitar
+
 A browser-based air guitar that uses a webcam to track your hands. Curl a finger on your fretting hand (left) to choose a chord, then sweep your strumming hand (right) up or down to play it. 
 
 Features
+
 Webcam hand tracking with MediaPipe Tasks Vision.
 Chord selection by finger gestures, including E, A, D, G, C, Am, Dm, Em, and Gm.
 Up and down strum detection, with the movement angle selecting how many strings play.
@@ -10,6 +12,7 @@ Audio volume and strum sensitivity controls.
 
 
 Requirements
+
 A modern browser such as Chrome or Edge.
 A webcam and permission to use it.
 A local web server or HTTPS. Browsers generally block webcam access from pages opened directly as file://.
@@ -17,6 +20,7 @@ Internet access the first time the app runs, to load MediaPipe and its hand-trac
 
 
 Run locally
+
 Open the project folder in Visual Studio Code.
 Install the Live Server extension if you do not already have a local web server.
 Open the app's index.html file and choose Go Live (or use another local static web server).
@@ -24,10 +28,7 @@ In the browser, allow camera access.
 
 
 Playing
+
 Put both hands where the camera can see them.
 Use the fretting hand(left) to curl a finger or supported finger combination to select a chord. The on-screen chord display shows the current selection.
 Use the strumming hand(right) to sweep and play that chord.
-
-Move the other hand up or down across the camera view to strum.
-
-Adjust volume and strum sensitivity if needed. You can also choose a chord with the on-screen chord buttons when available.
