@@ -1,26 +1,141 @@
-* { box-sizing: border-box; }
+* {
+  box-sizing: border-box;
+}
 
 body {
   margin: 0;
-  background: #101820;
-  color: #fff;
-  font: 16px/1.4 system-ui, sans-serif;
-}
-
-main {
-  max-width: 760px;
-  margin: 0 auto;
-  padding: 16px;
-}
-
-h1 { margin: 0 0 12px; text-align: center; }
-
-.video-wrap {
-  position: relative;
-  aspect-ratio: 4 / 3;
+  min-height: 100vh;
   background: #000;
-  border-radius: 16px;
+  color: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  overflow-x: hidden;
+  position: relative;
+}
+
+/* Fullscreen Acoustic Guitar Background */
+.guitar-bg {
+  position: fixed;
+  inset: 0;
+  background: #050302 url('images/guitar-bg.jpg') no-repeat left center;
+  background-size: cover;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.guitar-bg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 60% 45%, rgba(0, 0, 0, 0.22) 0%, rgba(5, 3, 2, 0.78) 85%);
+}
+
+.app-container {
+  position: relative;
+  z-index: 1;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 18px 24px 36px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Header & Title Box Matching Reference Mockup */
+.header {
+  margin-bottom: 14px;
+}
+
+.title-frame {
+  display: inline-block;
+  padding: 4px 28px;
+  border: 1.5px solid rgba(245, 158, 11, 0.65);
+  background: rgba(12, 7, 4, 0.55);
+  backdrop-filter: blur(6px);
+  border-radius: 4px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.6);
+}
+
+.main-title {
+  margin: 0;
+  font-size: 2.8rem;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  line-height: 1.1;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+.title-air {
+  color: #120d09;
+  text-shadow: 0 0 1px #fff, 0 1px 2px rgba(255, 255, 255, 0.4), 0 2px 6px rgba(0, 0, 0, 0.95);
+  margin-right: 6px;
+}
+
+.title-guitar {
+  color: #ff9900;
+  text-shadow: 0 0 20px rgba(255, 153, 0, 0.7), 0 2px 8px rgba(0, 0, 0, 0.95);
+}
+
+/* Center Stage: Webcam Flanked By Musical Notes */
+.stage-wrapper {
+  position: relative;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+/* Side Notes on Left & Right Flanks (From Reference Mockup) */
+.side-notes {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-around;
+  height: 380px;
+  width: 90px;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.left-notes {
+  align-items: flex-end;
+}
+
+.right-notes {
+  align-items: flex-start;
+}
+
+.ambient-note {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+  opacity: 0.88;
+  filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.85)) drop-shadow(0 0 10px rgba(245, 158, 11, 0.35));
+  animation: floatHover 3.6s ease-in-out infinite alternate;
+}
+
+.note-l1 { animation-delay: 0s; transform: rotate(-8deg); }
+.note-l2 { animation-delay: 1.8s; transform: rotate(12deg); }
+.note-r1 { animation-delay: 0.6s; transform: rotate(10deg); }
+.note-r2 { animation-delay: 2.2s; transform: rotate(-14deg); }
+.note-r3 { animation-delay: 1.2s; transform: rotate(6deg); }
+
+@keyframes floatHover {
+  0% { transform: translateY(0px) rotate(-6deg) scale(0.96); }
+  100% { transform: translateY(-16px) rotate(6deg) scale(1.04); }
+}
+
+/* Central Webcam Display */
+.webcam-box {
+  position: relative;
+  width: 620px;
+  max-width: 100%;
+  aspect-ratio: 4 / 3;
+  background: #080504;
+  border-radius: 36px;
   overflow: hidden;
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.95), 0 0 0 2px rgba(245, 158, 11, 0.45);
 }
 
 canvas#view {
@@ -34,63 +149,192 @@ canvas#view {
   inset: 0;
   display: grid;
   place-items: center;
-  padding: 20px;
+  padding: 24px;
   text-align: center;
-  background: #000c;
+  background: rgba(14, 9, 6, 0.9);
+  backdrop-filter: blur(8px);
+  z-index: 5;
 }
 
-[hidden] { display: none !important; }
+.empty p {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: #fbbf24;
+}
 
-.bar {
+[hidden] {
+  display: none !important;
+}
+
+/* Dynamic Floating Notes Layer (Triggers On Strum) */
+.dynamic-notes-layer {
+  position: absolute;
+  inset: -20px;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 4;
+}
+
+.burst-note {
+  position: absolute;
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+  opacity: 0;
+  bottom: 10px;
+  animation: noteFloatUp var(--dur) cubic-bezier(0.2, 0.8, 0.25, 1) forwards;
+}
+
+@keyframes noteFloatUp {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) scale(0.7) rotate(0deg);
+  }
+  15% {
+    opacity: 0.95;
+    filter: drop-shadow(0 0 12px rgba(245, 158, 11, 0.8));
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--dx), -460px, 0) scale(1.15) rotate(var(--rot));
+  }
+}
+
+/* 3 White Rounded Status Pills (From Reference Mockup) */
+.status-row {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-  margin-top: 12px;
+  justify-content: center;
+  align-items: stretch;
+  gap: 20px;
+  width: 100%;
+  max-width: 660px;
+  margin-bottom: 16px;
 }
 
-.info { gap: 20px; }
+.mockup-pill {
+  flex: 1;
+  background: #ffffff;
+  color: #111111;
+  border-radius: 12px;
+  padding: 10px 16px;
+  text-align: center;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55), 0 2px 4px rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 64px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background-color 0.2s ease;
+  user-select: none;
+}
 
-button, .file-btn {
-  font: inherit;
-  color: #fff;
-  background: #2a3a4a;
-  border: 1px solid #5a7a9a;
+.mockup-pill:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.7);
+}
+
+.pill-label {
+  font-size: 0.82rem;
+  font-weight: 750;
+  color: #111111;
+  letter-spacing: 0.02em;
+  margin-bottom: 2px;
+}
+
+.pill-val {
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: #111111;
+}
+
+.chord-pill .pill-val {
+  color: #b45309;
+  font-size: 1.6rem;
+}
+
+.state-pill.flash-down {
+  background: #d1fae5;
+  box-shadow: 0 0 18px rgba(16, 185, 129, 0.8);
+}
+
+.state-pill.flash-up {
+  background: #fae8ff;
+  box-shadow: 0 0 18px rgba(217, 70, 239, 0.8);
+}
+
+/* Action Row (Start Camera) */
+.action-row {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  margin-bottom: 18px;
+}
+
+.btn-start {
+  background: linear-gradient(135deg, #d97706, #b45309);
+  border: 1px solid #f59e0b;
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 1rem;
+  padding: 10px 30px;
   border-radius: 99px;
-  padding: 8px 18px;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(217, 119, 6, 0.5);
+  transition: all 0.2s ease;
+}
+
+.btn-start:hover {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(245, 158, 11, 0.65);
+}
+
+.btn-stop {
+  background: linear-gradient(135deg, #dc2626, #991b1b);
+  border: 1px solid #ef4444;
+  color: #fff;
+  font-weight: 700;
+  font-size: 1rem;
+  padding: 10px 30px;
+  border-radius: 99px;
   cursor: pointer;
 }
 
-button:hover, .file-btn:hover { background: #3a5068; }
-.file-btn input { display: none; }
-
-select {
-  font: inherit;
-  margin-left: 6px;
-  padding: 6px 10px;
-  border-radius: 8px;
+/* Plain Text Guide at Bottom */
+.plain-guide {
+  width: 100%;
+  max-width: 680px;
+  text-align: center;
+  margin-top: 10px;
+  user-select: none;
 }
 
-.note-layer {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  pointer-events: none;
+.guide-title {
+  font-size: 0.95rem;
+  font-weight: 750;
+  color: #f59e0b;
+  margin-bottom: 6px;
+  letter-spacing: 0.04em;
 }
 
-.rising-note {
-  position: absolute;
-  width: 48px;
-  height: 48px;
-  object-fit: contain;
-  bottom: -60px;
-  left: var(--x);
-  opacity: 0;
-  animation: noteRise var(--duration) cubic-bezier(.2, .7, .25, 1) forwards;
+.guide-text {
+  font-size: 0.92rem;
+  line-height: 1.6;
+  color: #e2e8f0;
 }
 
-@keyframes noteRise {
-  0%   { transform: translate3d(0, 0, 0) rotate(-12deg) scale(.72); opacity: 0; }
-  14%  { opacity: .92; }
-  100% { transform: translate3d(var(--drift), -520px, 0) rotate(25deg) scale(1.1); opacity: 0; }
+.guide-text b {
+  color: #fbbf24;
+}
+
+@media (max-width: 800px) {
+  .side-notes {
+    display: none;
+  }
+  .webcam-box {
+    width: 100%;
+  }
+  .status-row {
+    gap: 10px;
+  }
 }

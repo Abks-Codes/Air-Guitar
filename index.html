@@ -7,52 +7,84 @@
     <link rel="stylesheet" href="style.css">
   </head>
   <body>
-    <main>
-      <h1>Air Guitar</h1>
+    <!-- Background Guitar Wallpaper -->
+    <div class="guitar-bg"></div>
 
-      <div class="video-wrap">
-        <canvas id="view" width="640" height="480"></canvas>
-        <div class="note-layer" id="noteLayer"></div>
-        <div class="empty" id="videoEmpty">
-          <p id="emptyText">Load samples, then start the camera.</p>
+    <main class="app-container">
+      <!-- Title Header Matching Reference Mockup -->
+      <header class="header">
+        <div class="title-frame">
+          <h1 class="main-title">
+            <span class="title-air">AIR</span><span class="title-guitar">GUITAR</span>
+          </h1>
+        </div>
+      </header>
+
+      <!-- Center Stage: Webcam Flanked By Floating Musical Notes -->
+      <div class="stage-wrapper">
+        <!-- Left Side Musical Notes -->
+        <div class="side-notes left-notes">
+          <img src="note.png" class="ambient-note note-l1" alt="note">
+          <img src="note.png" class="ambient-note note-l2" alt="note">
+        </div>
+
+        <!-- Central Webcam Display with Rounded Border -->
+        <div class="webcam-box">
+          <canvas id="view" width="640" height="480"></canvas>
+          <div class="empty" id="videoEmpty">
+            <p>Click "Start camera" to play</p>
+          </div>
+        </div>
+
+        <!-- Right Side Musical Notes -->
+        <div class="side-notes right-notes">
+          <img src="note.png" class="ambient-note note-r1" alt="note">
+          <img src="note.png" class="ambient-note note-r2" alt="note">
+          <img src="note.png" class="ambient-note note-r3" alt="note">
+        </div>
+
+        <!-- Dynamic Floating Notes Burst Layer -->
+        <div class="dynamic-notes-layer" id="dynamicNotesLayer"></div>
+      </div>
+
+      <!-- 3 White Rounded Status Pills Matching Reference Mockup -->
+      <div class="status-row">
+        <div class="mockup-pill chord-pill">
+          <div class="pill-label">CHORD</div>
+          <div class="pill-val" id="chordName">A</div>
+        </div>
+
+        <div class="mockup-pill hands-pill">
+          <div class="pill-label">No. of hand tracked</div>
+          <div class="pill-val" id="handCount">0</div>
+        </div>
+
+        <div class="mockup-pill state-pill" id="statePill">
+          <div class="pill-label">Ready?</div>
+          <div class="pill-val" id="status">Ready</div>
         </div>
       </div>
 
-      <div class="bar">
-        <button id="cameraButton">Start camera</button>
-        <label class="file-btn">
-          <span id="sampleBadge">Load samples</span>
-          <input id="sampleFiles" type="file" webkitdirectory multiple accept=".wav,audio/wav">
-        </label>
-        <label class="field">
-          Fretting hand
-          <select id="fretHand">
-            <option value="Right" selected>Right</option>
-            <option value="Left">Left</option>
-          </select>
-        </label>
-        <label class="field">
-          Strumming hand
-          <select id="strumHand">
-            <option value="Right">Right</option>
-            <option value="Left" selected>Left</option>
-          </select>
-        </label>
-        
-        <label class="field">
-  Strum sensitivity
-  <input type="range" id="sensitivity" min="1" max="9" value="5">
-</label>
-
+      <!-- Simple Camera Action Button -->
+      <div class="action-row">
+        <button id="cameraButton" class="btn-start">Start camera</button>
       </div>
 
-      <div class="bar info">
-        <div>Chord: <b id="chordName">none</b></div>
-        <div>Hands: <b id="handCount">0</b></div>
-        <div id="status">Loading samples…</div>
-      </div>
-
-      <div class="bar" id="chordButtons"></div>
+      <!-- Bottom Plain Text Guide -->
+      <footer class="plain-guide">
+        <div class="guide-title">Fretting Hand Guide (Left Hand):</div>
+        <div class="guide-text">
+          Thumb: <b>E</b> &nbsp;&bull;&nbsp;
+          Index: <b>A</b> &nbsp;&bull;&nbsp;
+          Middle: <b>D</b> &nbsp;&bull;&nbsp;
+          Ring: <b>G</b> &nbsp;&bull;&nbsp;
+          Pinky: <b>C</b> &nbsp;&bull;&nbsp;
+          Thumb+Index: <b>Am</b> &nbsp;&bull;&nbsp;
+          Middle+Ring: <b>Dm</b> &nbsp;&bull;&nbsp;
+          Ring+Pinky: <b>Em</b> &nbsp;&bull;&nbsp;
+          Thumb+Middle: <b>Gm</b>
+        </div>
+      </footer>
     </main>
 
     <script src="script.js"></script>

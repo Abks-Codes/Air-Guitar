@@ -1,684 +1,656 @@
-const MEDIAPIPE_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
-const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
+// Air Guitar — Real Acoustic Guitar Chords & Fast Up/Down Strumming
+// Powered by MediaPipe HandLandmarker & Meta Open Sound Steel Guitar Samples
 
-const BASE = 'meta-open-sound-meta-steel-guitar-wav/';
-const LAYER = 'Vel02';
+(() => {
+  const MEDIAPIPE_VERSION = "0.10.14";
+  const WASM_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}/wasm`;
+  const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+  const SAMPLE_BASE = "meta-open-sound-meta-steel-guitar-wav/";
 
-function sample(stringName, pitch) {
-  return BASE + 'INSGuitarSteel_' + stringName + '_' + LAYER + '_' + pitch + '_01.wav';
-}
+  // 9 Chord Voicings (Steel Guitar)
+  const CHORDS = {
+    E:  ["LowE:E2", "A:B2", "D:E3", "G:G#3", "B:B3", "HighE:E4"],
+    A:  ["A:A2", "D:E3", "G:A3", "B:C#4", "HighE:E4"],
+    D:  ["D:D3", "G:A3", "B:D4", "HighE:F#4"],
+    G:  ["LowE:G2", "A:B2", "D:D3", "G:G3", "B:B3", "HighE:G4"],
+    C:  ["A:C3", "D:E3", "G:G3", "B:C4", "HighE:E4"],
+    Am: ["A:A2", "D:E3", "G:A3", "B:C4", "HighE:E4"],
+    Dm: ["D:D3", "G:A3", "B:D4", "HighE:F4"],
+    Em: ["LowE:E2", "A:B2", "D:E3", "G:G3", "B:B3", "HighE:E4"],
+    Gm: ["LowE:G2", "A:D3", "D:G3", "G:A#3", "B:D4", "HighE:G4"],
+  };
+  const CHORD_NAMES = Object.keys(CHORDS);
 
-const chords = {
-  A: ['guitar-chord-a-major_140bpm_A_major-[AudioTrimmer.com].wav'],
-  D: [
-    sample('StringD', 'D3'),
-    sample('StringG', 'A3'),
-    sample('StringB', 'D4'),
-    sample('StringHighE', 'Fs4')
-  ],
-  E: [
-    sample('StringLowE', 'E2'),
-    sample('StringA', 'B2'),
-    sample('StringD', 'E3'),
-    sample('StringG', 'Gs3'),
-    sample('StringB', 'B3'),
-    sample('StringHighE', 'E4')
-  ],
-  G: [
-    sample('StringLowE', 'G2'),
-    sample('StringA', 'B2'),
-    sample('StringD', 'D3'),
-    sample('StringG', 'G3'),
-    sample('StringB', 'D4'),
-    sample('StringHighE', 'G4')
-  ],
-  C: [
-    sample('StringA', 'C3'),
-    sample('StringD', 'E3'),
-    sample('StringG', 'G3'),
-    sample('StringB', 'C4'),
-    sample('StringHighE', 'E4')
-  ],
-  Am: [
-    sample('StringA', 'A2'),
-    sample('StringD', 'E3'),
-    sample('StringG', 'A3'),
-    sample('StringB', 'C4'),
-    sample('StringHighE', 'E4')
-  ],
-  Dm: ['guitar-chord-d-minor_140bpm_D_minorguitar-chord-d-minor_140bpm_D_minor.wav'],
-  Em: [
-    "guitar-chord-e-minor_140bpm_E_minor-[AudioTrimmer.com].wav"
-  ]
-};
+  const CONNECTIONS = [
+    [0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8],
+    [5, 9], [9, 10], [10, 11], [11, 12], [9, 13], [13, 14], [14, 15],
+    [15, 16], [13, 17], [17, 18], [18, 19], [19, 20], [0, 17],
+  ];
 
-const ALL_PATHS = [...new Set(Object.values(chords).flat())];
-const MAX_SECONDS = 1.6;
-const VOLUME = 1.0;
-const CHOKE_PREVIOUS = true;
-const CHOKE_SECONDS = 0.04;
+  const $ = (id) => document.getElementById(id);
+  const ui = {
+    canvas: $("view"),
+    empty: $("videoEmpty"),
+    cameraButton: $("cameraButton"),
+    chordName: $("chordName"),
+    handCount: $("handCount"),
+    status: $("status"),
+    statePill: $("statePill"),
+    dynamicNotes: $("dynamicNotesLayer"),
+  };
 
-function $(id) {
-  return document.getElementById(id);
-}
+  const video = document.createElement("video");
+  video.autoplay = true;
+  video.playsInline = true;
+  video.muted = true;
+  video.style.display = "none";
+  document.body.appendChild(video);
 
-function baseName(path) {
-  return path.split('/').pop();
-}
+  const state = {
+    running: false,
+    stream: null,
+    landmarker: null,
+    fileset: null,
+    audio: null,
+    masterGain: null,
+    chordBuffers: new Map(),
+    stringBuffers: new Map(),
+    activeVoices: new Set(),
+    selectedChord: "A",
+    candidateChord: null,
+    candidateCount: 0,
+    lastChordChangeTime: 0,
+    lastVideoTime: -1,
+    lastTimestamp: 0,
+    frameRequestId: null,
+    lastStrumDirection: null,
+    lastStrumTime: 0,
+  };
 
-let audioContext = null;
-let buffers = new Map();
-let activeNotes = [];
+  const setStatus = (txt) => { if (ui.status) ui.status.textContent = txt; };
 
-function setStatus(text) {
-  $('status').textContent = text;
-}
+  // Audio Engine — only call AFTER a user gesture to avoid autoplay suspension
+  function ensureAudio() {
+    if (!state.audio) {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      state.audio = new AudioCtx({ latencyHint: "interactive" });
 
-async function decodeAll(getBytes) {
-  if (audioContext === null) {
-    audioContext = new AudioContext();
-  }
+      state.masterGain = state.audio.createGain();
+      state.masterGain.gain.value = 0.85;
 
-  buffers.clear();
+      const compressor = state.audio.createDynamicsCompressor();
+      compressor.threshold.value = -12;
+      compressor.knee.value = 10;
+      compressor.ratio.value = 4;
+      compressor.attack.value = 0.003;
+      compressor.release.value = 0.12;
 
-  for (const path of ALL_PATHS) {
-    const bytes = await getBytes(path);
-    if (bytes === null) {
-      continue;
+      state.masterGain.connect(compressor);
+      compressor.connect(state.audio.destination);
     }
-    buffers.set(path, await audioContext.decodeAudioData(bytes));
-    $('sampleBadge').textContent = 'Loading ' + buffers.size + '/' + ALL_PATHS.length;
+    return state.audio;
   }
 
-  $('sampleBadge').textContent = buffers.size + '/' + ALL_PATHS.length + ' samples';
+  // Preload audio — must run AFTER AudioContext is resumed by user gesture
+  async function preloadAllSamples() {
+    const audio = ensureAudio();
+    // Ensure context is running before decoding
+    if (audio.state === "suspended") await audio.resume();
 
-  if (buffers.size === ALL_PATHS.length) {
-    setStatus('Samples ready. Start the camera.');
-  } else if (buffers.size === 0) {
-    setStatus('No matching WAV files found. Pick the project folder.');
-  } else {
-    setStatus('Some samples are missing. Pick the whole project folder.');
+    setStatus("Loading audio…");
+    let loaded = 0;
+
+    await Promise.all([
+      ...CHORD_NAMES.flatMap((chord) => ["down", "up"].map(async (dir) => {
+        try {
+          const resp = await fetch(`chords/${chord}_${dir}.wav`);
+          if (!resp.ok) return;
+          const buf = await audio.decodeAudioData(await resp.arrayBuffer());
+          state.chordBuffers.set(`${chord}_${dir}`, buf);
+          loaded++;
+        } catch (e) { console.warn(`Failed to load chords/${chord}_${dir}.wav`, e); }
+      })),
+      ...[...new Set(Object.values(CHORDS).flat())].map(async (sn) => {
+        try {
+          const [str, note] = sn.split(":");
+          const pitch = note.replace("#", "s");
+          const resp = await fetch(`${SAMPLE_BASE}INSGuitarSteel_String${str}_Vel02_${pitch}_01.wav`);
+          if (!resp.ok) return;
+          const buf = await audio.decodeAudioData(await resp.arrayBuffer());
+          state.stringBuffers.set(sn, buf);
+          loaded++;
+        } catch (e) { console.warn(`Failed to load string sample ${sn}`, e); }
+      }),
+    ]);
+
+    console.log(`[Air Guitar] Loaded ${state.chordBuffers.size} chord WAVs, ${state.stringBuffers.size} string samples.`);
+    setStatus("Ready");
   }
-}
 
-async function tryHostedSamples() {
-  try {
-    await decodeAll(async function (path) {
-      const response = await fetch(path);
-      return response.ok ? response.arrayBuffer() : null;
-    });
-  } catch (error) {
-    console.warn('Hosted samples not available', error);
-    buffers.clear();
-    $('sampleBadge').textContent = 'Load samples';
-    setStatus('Click Load samples and pick the project folder.');
-  }
-}
+  // Audio Playback
+  function playChord(direction = "down", speed = 7.0) {
+    const chord = state.selectedChord || "A";
+    if (!CHORDS[chord]) return;
+    if (!state.audio || !state.masterGain) return; // Audio not yet initialized
 
-$('sampleFiles').addEventListener('change', async function (event) {
-  const files = new Map();
-  for (const file of event.target.files) {
-    files.set(file.name, file);
-  }
-
-  try {
-    await decodeAll(async function (path) {
-      const file = files.get(baseName(path));
-      return file ? file.arrayBuffer() : null;
-    });
-  } catch (error) {
-    console.error(error);
-    setStatus('Could not decode those WAV files.');
-  }
-});
-
-function chordIsReady(chordName) {
-  return chords[chordName].every(function (path) {
-    return buffers.has(path);
-  });
-}
-
-function chokeActiveNotes(now) {
-  for (const note of activeNotes) {
-    try {
-      note.gain.gain.cancelScheduledValues(now);
-      note.gain.gain.setValueAtTime(note.gain.gain.value, now);
-      note.gain.gain.linearRampToValueAtTime(0, now + CHOKE_SECONDS);
-      note.source.stop(now + CHOKE_SECONDS + 0.01);
-    } catch (error) {
-      // The note already ended.
+    if (state.audio.state === "suspended") {
+      state.audio.resume();
+      return; // Don't play mid-resume to avoid glitch; next strum will play
     }
-  }
 
-  activeNotes = [];
-}
+    const now = state.audio.currentTime;
 
-function playChord(chordName) {
-  if (!chordIsReady(chordName)) {
-    setStatus('Missing sample files for ' + chordName);
-    return;
-  }
+    // Gently damp older playing voices to prevent clipping
+    for (const voice of state.activeVoices) {
+      try {
+        voice.gain.gain.cancelScheduledValues(now);
+        voice.gain.gain.setValueAtTime(voice.gain.gain.value, now);
+        voice.gain.gain.setTargetAtTime(0, now, 0.04);
+        voice.source.stop(now + 0.15);
+      } catch (_) {}
+    }
+    while (state.activeVoices.size >= 8) {
+      state.activeVoices.delete(state.activeVoices.values().next().value);
+    }
 
-  const now = audioContext.currentTime;
+    const hitStrength = Math.min(1.2, Math.max(0.75, 0.70 + (speed / 15) * 0.4));
+    const chordKey = `${chord}_${direction}`;
+    const chordBuf = state.chordBuffers.get(chordKey) || state.chordBuffers.get(`${chord}_${direction === "down" ? "up" : "down"}`);
 
-  if (CHOKE_PREVIOUS) {
-    chokeActiveNotes(now);
-  }
+    if (chordBuf) {
+      const source = state.audio.createBufferSource();
+      const gain = state.audio.createGain();
 
-  for (const path of chords[chordName]) {
-    const source = audioContext.createBufferSource();
-    const gain = audioContext.createGain();
+      source.buffer = chordBuf;
+      gain.gain.setValueAtTime(hitStrength, now);
 
-    source.buffer = buffers.get(path);
-    gain.gain.value = VOLUME;
-    source.connect(gain);
-    gain.connect(audioContext.destination);
-    source.start(now);
-    source.stop(now + MAX_SECONDS);
+      source.connect(gain);
+      gain.connect(state.masterGain);
 
-    const note = { source: source, gain: gain };
-    activeNotes.push(note);
-    source.addEventListener('ended', function () {
-      activeNotes = activeNotes.filter(function (n) {
-        return n !== note;
+      registerVoice(source, gain);
+      source.start(now);
+    } else {
+      const notes = [...CHORDS[chord]];
+      if (direction === "up") notes.reverse();
+      const stagger = direction === "up" ? 0.013 : 0.017;
+      notes.forEach((sn, idx) => {
+        const buffer = state.stringBuffers.get(sn);
+        if (!buffer) return;
+        const src = state.audio.createBufferSource();
+        const g = state.audio.createGain();
+        src.buffer = buffer;
+        g.gain.setValueAtTime(0.85 * hitStrength, now + idx * stagger);
+        src.connect(g);
+        g.connect(state.masterGain);
+        registerVoice(src, g);
+        src.start(now + idx * stagger);
       });
-    });
+    }
+
+    triggerStrumFeedback(direction);
   }
 
-  setStatus('Strum: ' + chordName);
-  showRisingNotes(Math.max(3, chords[chordName].length));
-}
-
-function showRisingNotes(count) {
-  const layer = $('noteLayer');
-
-  for (let i = 0; i < count; i++) {
-    const note = document.createElement('img');
-    note.className = 'rising-note';
-    note.src = 'note.png';
-    note.alt = '';
-    note.style.setProperty('--x', (8 + Math.random() * 82) + '%');
-    note.style.setProperty('--drift', Math.round(Math.random() * 130 - 65) + 'px');
-    note.style.setProperty('--duration', (2.1 + Math.random() * 1.1) + 's');
-    note.style.animationDelay = (i * 0.075) + 's';
-    layer.append(note);
-    note.addEventListener('animationend', function () {
-      note.remove();
-    }, { once: true });
+  function registerVoice(source, gain) {
+    const voice = { source, gain };
+    state.activeVoices.add(voice);
+    source.onended = () => {
+      state.activeVoices.delete(voice);
+      try { source.disconnect(); gain.disconnect(); } catch (_) {}
+    };
   }
-}
 
-for (const name of Object.keys(chords)) {
-  const button = document.createElement('button');
-  button.textContent = name;
-  button.addEventListener('click', async function () {
-    if (audioContext === null || buffers.size === 0) {
-      setStatus('Load samples first.');
+  // Chord Selection (Silent: Fretting hand selects, strum hand plays)
+  function changeChord(chord, autoPlay = false) {
+    if (!CHORDS[chord]) return;
+    const now = performance.now() / 1000;
+    if (chord === state.selectedChord && !autoPlay) return;
+    if (chord !== state.selectedChord && now - state.lastChordChangeTime < 0.12) return;
+
+    state.selectedChord = chord;
+    state.lastChordChangeTime = now;
+    updateChordUI(chord);
+
+    if (autoPlay) playChord("down", 7.5);
+  }
+
+  function updateChordUI(chord) {
+    if (ui.chordName) ui.chordName.textContent = chord;
+  }
+
+  function triggerStrumFeedback(direction) {
+    const isDown = direction === "down";
+    if (ui.statePill) {
+      ui.statePill.classList.remove("flash-down", "flash-up");
+      void ui.statePill.offsetWidth;
+      ui.statePill.classList.add(isDown ? "flash-down" : "flash-up");
+      setTimeout(() => ui.statePill?.classList.remove("flash-down", "flash-up"), 300);
+    }
+    setStatus(isDown ? "⬇️ Down Strum" : "⬆️ Up Strum");
+    burstFloatingNotes();
+  }
+
+  function burstFloatingNotes() {
+    if (!ui.dynamicNotes) return;
+    for (let i = 0; i < 3; i++) {
+      const img = document.createElement("img");
+      img.className = "burst-note";
+      img.src = "note.png";
+      const isRight = Math.random() > 0.35;
+      const xPercent = isRight ? (76 + Math.random() * 20) : (4 + Math.random() * 18);
+      const dx = (Math.random() * 80 - 40) + (isRight ? 20 : -20);
+      const rot = Math.round(Math.random() * 60 - 30);
+      const dur = 1.4 + Math.random() * 0.8;
+
+      img.style.left = `${xPercent}%`;
+      img.style.setProperty("--dx", `${dx}px`);
+      img.style.setProperty("--rot", `${rot}deg`);
+      img.style.setProperty("--dur", `${dur}s`);
+      img.style.animationDelay = `${i * 0.06}s`;
+
+      ui.dynamicNotes.append(img);
+      img.addEventListener("animationend", () => img.remove(), { once: true });
+    }
+  }
+
+  // 3D Geometry & Finger Curls
+  const dist3d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, (a.z ?? 0) - (b.z ?? 0));
+
+  function angle3d(a, b, c) {
+    const ba = [a.x - b.x, a.y - b.y, (a.z ?? 0) - (b.z ?? 0)];
+    const bc = [c.x - b.x, c.y - b.y, (c.z ?? 0) - (b.z ?? 0)];
+    const dot = ba[0] * bc[0] + ba[1] * bc[1] + ba[2] * bc[2];
+    const lenBa = Math.hypot(...ba), lenBc = Math.hypot(...bc);
+    if (!lenBa || !lenBc) return 180;
+    return Math.acos(Math.max(-1, Math.min(1, dot / (lenBa * lenBc)))) * 180 / Math.PI;
+  }
+
+  function computeHandCurls(pts) {
+    const wrist = pts[0];
+    const scale = Math.max(0.01, dist3d(wrist, pts[9]));
+    const fingers = [
+      { name: "index", mcp: 5, pip: 6, dip: 7, tip: 8 },
+      { name: "middle", mcp: 9, pip: 10, dip: 11, tip: 12 },
+      { name: "ring", mcp: 13, pip: 14, dip: 15, tip: 16 },
+      { name: "pinky", mcp: 17, pip: 18, dip: 19, tip: 20 },
+    ];
+
+    const curls = {};
+    for (const { name, mcp, pip, dip, tip } of fingers) {
+      const tipWrist = dist3d(pts[tip], wrist) / scale;
+      const tipMcp = dist3d(pts[tip], pts[mcp]) / scale;
+      const pipAng = angle3d(pts[mcp], pts[pip], pts[dip]);
+
+      let score = 0;
+      if (tipWrist < 1.1) score += 0.45; else if (tipWrist < 1.35) score += 0.2;
+      if (tipMcp < 0.6) score += 0.35; else if (tipMcp < 0.8) score += 0.15;
+      if (pipAng < 125) score += 0.35; else if (pipAng < 145) score += 0.15;
+      curls[name] = Math.min(1.0, score);
+    }
+
+    const tTip = pts[4], tMcp = pts[2], tIp = pts[3], tBase = pts[1];
+    let tScore = 0;
+    if (dist3d(tTip, pts[13]) / scale < 0.62) tScore += 0.5;
+    if (dist3d(tTip, pts[5]) / scale < 0.42) tScore += 0.35;
+    if (angle3d(tBase, tMcp, tIp) < 140) tScore += 0.3;
+    curls.thumb = Math.min(1.0, tScore);
+
+    return curls;
+  }
+
+  function classifyChordFromCurls(curls) {
+    const sorted = Object.entries(curls).sort((a, b) => b[1] - a[1]);
+    const [f1, s1] = sorted[0];
+    const [f2, s2] = sorted[1];
+    const [, s3] = sorted[2];
+
+    // Single bent finger
+    if (s1 >= 0.52 && (s1 - s2 >= 0.20)) {
+      const singleMap = { thumb: "E", index: "A", middle: "D", ring: "G", pinky: "C" };
+      return singleMap[f1] || null;
+    }
+
+    // Two bent fingers
+    if (s1 >= 0.48 && s2 >= 0.42 && (s2 - s3 >= 0.14)) {
+      const pair = new Set([f1, f2]);
+      if (pair.has("thumb") && pair.has("index")) return "Am";
+      if (pair.has("middle") && pair.has("ring")) return "Dm";
+      if (pair.has("ring") && pair.has("pinky")) return "Em";
+      if (pair.has("thumb") && pair.has("middle")) return "Gm";
+      if (pair.has("index") && pair.has("middle")) return "Gm";
+    }
+
+    // Finger counting / extension fallback
+    const ext = Object.entries(curls).filter(([_, c]) => c < 0.38).map(([f]) => f);
+    if (ext.length === 1 && ext[0] === "index") return "A";
+    if (ext.length === 2 && ext.includes("index") && ext.includes("middle")) return "D";
+    if (ext.length === 3 && ext.includes("index") && ext.includes("middle") && ext.includes("ring")) return "G";
+    if (ext.length === 4 && !ext.includes("thumb")) return "C";
+    if (ext.length === 5) return "E";
+    if (ext.length === 0) return "Em";
+
+    return null;
+  }
+
+  // Precise Strum Tracking with Directional Arming
+  // Guarantees EXACTLY ONE sound per stroke (eliminates double/triple triggering)
+  let lastPy = null;
+  let lastTime = null;
+  let smoothedVy = 0;
+  let armedDown = true;
+  let armedUp = true;
+
+  function handleStrumTracking(pts, now, width, height) {
+    let py = 0;
+    const trackedIndices = [0, 5, 8, 9, 12, 13, 17];
+    for (const id of trackedIndices) {
+      py += pts[id].y * height;
+    }
+    py /= trackedIndices.length;
+
+    if (lastPy === null || lastTime === null) {
+      lastPy = py;
+      lastTime = now;
       return;
     }
-    await audioContext.resume();
-    playChord(name);
-  });
-  $('chordButtons').append(button);
-}
 
-$('fretHand').addEventListener('change', function () {
-  $('strumHand').value = $('fretHand').value === 'Right' ? 'Left' : 'Right';
-});
+    const dt = Math.max(0.008, now - lastTime);
+    lastTime = now;
 
-$('strumHand').addEventListener('change', function () {
-  $('fretHand').value = $('strumHand').value === 'Right' ? 'Left' : 'Right';
-});
+    // Instantaneous velocity in pixels / second
+    const rawVy = (py - lastPy) / dt;
+    lastPy = py;
 
-// ----- Finger bend detection -----
+    // Smooth velocity with exponential moving average
+    smoothedVy = smoothedVy * 0.35 + rawVy * 0.65;
 
-const fingers = {
-  thumb: [1, 2, 3, 4],
-  index: [5, 6, 7, 8],
-  middle: [9, 10, 11, 12],
-  ring: [13, 14, 15, 16],
-  pinky: [17, 18, 19, 20]
-};
+    const SPEED_THRESHOLD = 110; // px/s to trigger a strum
+    const cooldown = now - state.lastStrumTime;
 
-function distance2d(a, b) {
-  return Math.hypot(a.x - b.x, a.y - b.y);
-}
+    // Re-arm opposite stroke when direction changes, or both when hand rests
+    if (smoothedVy < -35) {
+      armedDown = true; // moving up re-arms down-strum
+    } else if (smoothedVy > 35) {
+      armedUp = true;   // moving down re-arms up-strum
+    } else if (Math.abs(smoothedVy) < 25) {
+      armedDown = true;
+      armedUp = true;
+    }
 
-function angle3d(a, b, c) {
-  const ba = [a.x - b.x, a.y - b.y, a.z - b.z];
-  const bc = [c.x - b.x, c.y - b.y, c.z - b.z];
-
-  let dot = 0;
-  for (let i = 0; i < 3; i++) {
-    dot += ba[i] * bc[i];
-  }
-
-  const lengthBa = Math.sqrt(ba[0] * ba[0] + ba[1] * ba[1] + ba[2] * ba[2]);
-  const lengthBc = Math.sqrt(bc[0] * bc[0] + bc[1] * bc[1] + bc[2] * bc[2]);
-
-  if (lengthBa === 0 || lengthBc === 0) {
-    return 180;
-  }
-
-  let cosine = dot / (lengthBa * lengthBc);
-  cosine = Math.max(-1, Math.min(1, cosine));
-  return Math.acos(cosine) * 180 / Math.PI;
-}
-
-function detectBentFingers(landmarks) {
-  const bent = {};
-
-  for (const [fingerName, ids] of Object.entries(fingers)) {
-    const base = landmarks[ids[0]];
-    const joint1 = landmarks[ids[1]];
-    const joint2 = landmarks[ids[2]];
-    const tip = landmarks[ids[3]];
-
-    if (fingerName === 'thumb') {
-      const angle1 = angle3d(base, joint1, joint2);
-      const angle2 = angle3d(joint1, joint2, tip);
-      bent.thumb = angle1 < 145 || angle2 < 145;
-    } else {
-      const tipToBase = distance2d(tip, base);
-      const totalLength =
-        distance2d(base, joint1) +
-        distance2d(joint1, joint2) +
-        distance2d(joint2, tip);
-
-      bent[fingerName] = tipToBase / (totalLength + 1e-6) < 0.6;
+    if (smoothedVy > SPEED_THRESHOLD && armedDown && cooldown >= 0.08) {
+      // Down strum: fires once per downward stroke
+      playChord("down", Math.abs(smoothedVy) / 40);
+      armedDown = false; // Disarmed until hand reverses or rests
+      state.lastStrumDirection = "down";
+      state.lastStrumTime = now;
+    } else if (smoothedVy < -SPEED_THRESHOLD && armedUp && cooldown >= 0.08) {
+      // Up strum: fires once per upward stroke
+      playChord("up", Math.abs(smoothedVy) / 40);
+      armedUp = false; // Disarmed until hand reverses or rests
+      state.lastStrumDirection = "up";
+      state.lastStrumTime = now;
     }
   }
 
-  return bent;
-}
-
-function chooseChord(bent) {
-  if (bent.thumb && bent.index) return 'Am';
-  if (bent.middle && bent.ring) return 'Dm';
-  if (bent.ring && bent.pinky) return 'Em';
-  if (bent.thumb) return 'E';
-  if (bent.index) return 'A';
-  if (bent.middle) return 'D';
-  if (bent.ring) return 'G';
-  if (bent.pinky) return 'C';
-  return null;
-}
-
-// ----- MediaPipe setup -----
-
-let mediapipe = null;
-let landmarker = null;
-
-async function loadTracker() {
-  if (landmarker !== null) {
-    return;
+  // Hand Roles:
+  // In mirrored camera: Player's RIGHT hand is on screen right (raw x < 0.5)
+  // Player's LEFT hand is on screen left (raw x >= 0.5)
+  function isHandStrumming(hands, pts) {
+    if (hands.length >= 2) {
+      // With 2 hands: the hand on the player's right (smaller raw x) is STRUMMING
+      const sorted = [...hands].sort((a, b) => a[0].x - b[0].x);
+      return pts === sorted[0];
+    }
+    // With 1 hand: can always strum when moved vertically
+    return true;
   }
 
-  mediapipe = await import(MEDIAPIPE_URL);
-  const vision = await mediapipe.FilesetResolver.forVisionTasks(MEDIAPIPE_URL + '/wasm');
+  // Drawing Hands on Mirrored Canvas
+  function drawHands(ctx, canvas, result) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.save();
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    ctx.restore();
 
-  async function create(delegate) {
-    return mediapipe.HandLandmarker.createFromOptions(vision, {
-      baseOptions: { modelAssetPath: MODEL_URL, delegate: delegate },
-      runningMode: 'VIDEO',
-      numHands: 2
+    const hands = result.landmarks || [];
+    for (let i = 0; i < hands.length; i++) {
+      const pts = hands[i];
+      const strum = isHandStrumming(hands, pts);
+      const color = strum ? "#34d399" : "#f59e0b";
+      ctx.strokeStyle = color;
+      ctx.fillStyle = color;
+      ctx.lineWidth = Math.max(2.5, canvas.width / 340);
+
+      for (const [from, to] of CONNECTIONS) {
+        ctx.beginPath();
+        ctx.moveTo((1 - pts[from].x) * canvas.width, pts[from].y * canvas.height);
+        ctx.lineTo((1 - pts[to].x) * canvas.width, pts[to].y * canvas.height);
+        ctx.stroke();
+      }
+      for (const pt of pts) {
+        ctx.beginPath();
+        ctx.arc((1 - pt.x) * canvas.width, pt.y * canvas.height, Math.max(3, canvas.width / 160), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  function processHands(result, now, width, height) {
+    const hands = result.landmarks || [];
+    if (ui.handCount) ui.handCount.textContent = String(hands.length);
+    if (hands.length === 0) {
+      lastPy = null;
+      lastTime = null;
+      smoothedVy = 0;
+      strumPhase = "neutral";
+      return;
+    }
+
+    let fretting = null;
+    let strumming = null;
+
+    if (hands.length >= 2) {
+      const sorted = [...hands].sort((a, b) => a[0].x - b[0].x);
+      strumming = sorted[0]; // Player's Right Hand (camera left, x is smaller)
+      fretting = sorted[1];  // Player's Left Hand (camera right, x is larger)
+    } else {
+      const hand = hands[0];
+      strumming = hand;
+      fretting = hand;
+    }
+
+    if (fretting) {
+      const detected = classifyChordFromCurls(computeHandCurls(fretting));
+      if (detected) {
+        if (detected === state.candidateChord) {
+          state.candidateCount++;
+        } else {
+          state.candidateChord = detected;
+          state.candidateCount = 1;
+        }
+        if (state.candidateCount >= 2 && state.candidateChord !== state.selectedChord) {
+          changeChord(state.candidateChord, false);
+        }
+      }
+    }
+
+    if (strumming) {
+      handleStrumTracking(strumming, now / 1000, width, height);
+    } else {
+      lastPy = null;
+      lastTime = null;
+      smoothedVy = 0;
+      strumPhase = "neutral";
+    }
+  }
+
+  // Vision Pipeline & Loop
+  async function makeLandmarker(delegate) {
+    const { FilesetResolver, HandLandmarker } = await import(
+      `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}/vision_bundle.mjs`
+    );
+    if (!state.fileset) state.fileset = await FilesetResolver.forVisionTasks(WASM_URL);
+    return HandLandmarker.createFromOptions(state.fileset, {
+      baseOptions: { modelAssetPath: MODEL_URL, delegate },
+      runningMode: "VIDEO",
+      numHands: 2,
+      minHandDetectionConfidence: 0.40,
+      minHandPresenceConfidence: 0.40,
+      minTrackingConfidence: 0.40,
     });
   }
 
-  try {
-    landmarker = await create('GPU');
-  } catch (error) {
-    console.warn('GPU unavailable, using CPU', error);
-    landmarker = await create('CPU');
-  }
-}
-
-// ----- Strum detection -----
-// Speeds are measured in hand-sizes per second, so they do not depend on
-// how far you are from the camera.
-
-const WINDOW_SECONDS = 0.12;
-const MIN_WINDOW_SECONDS = 0.05;
-const HISTORY_SECONDS = 0.25;
-const MAX_SPEED = 30;
-const SLOW_HOLD_SECONDS = 0.08;
-const STRUM_COOLDOWN = 0.25;
-const HAND_LOST_RESET_SECONDS = 0.3;
-const CHORD_STABLE_FRAMES = 3;
-
-let cameraStream = null;
-let running = false;
-let lastVideoTime = -1;
-
-let selectedChord = null;
-let chordCandidate = null;
-let chordCount = 0;
-
-let strumHistory = [];
-let handSize = null;
-let strumArmed = true;
-let strumDirection = null;
-let slowSince = null;
-let lastStrumTime = 0;
-let lastStrumSeen = 0;
-
-const video = document.createElement('video');
-video.muted = true;
-video.playsInline = true;
-
-const canvas = $('view');
-const ctx = canvas.getContext('2d');
-
-function resetStrum() {
-  strumHistory = [];
-  handSize = null;
-  strumArmed = true;
-  strumDirection = null;
-  slowSince = null;
-}
-
-function resetChord() {
-  selectedChord = null;
-  chordCandidate = null;
-  chordCount = 0;
-}
-
-function updateChord(newChord) {
-  if (newChord === null) {
-    chordCandidate = null;
-    chordCount = 0;
-    return;
-  }
-
-  if (newChord === chordCandidate) {
-    chordCount++;
-  } else {
-    chordCandidate = newChord;
-    chordCount = 1;
-  }
-
-  if (chordCount >= CHORD_STABLE_FRAMES) {
-    selectedChord = chordCandidate;
-  }
-}
-
-function handleStrum(landmarks, now, width, height) {
-  lastStrumSeen = now;
-
-  // Palm center is steadier than a single wrist point.
-  let x = 0;
-  let y = 0;
-  for (const id of [0, 5, 9, 13, 17]) {
-    x += landmarks[id].x * width;
-    y += landmarks[id].y * height;
-  }
-  x /= 5;
-  y /= 5;
-
-  const rawSize = Math.hypot(
-    (landmarks[0].x - landmarks[9].x) * width,
-    (landmarks[0].y - landmarks[9].y) * height
-  );
-  handSize = handSize === null ? rawSize : handSize * 0.8 + rawSize * 0.2;
-
-  if (handSize < 8) {
-    return;
-  }
-
-  strumHistory.push({ t: now, x: x, y: y });
-  while (strumHistory.length > 0 && now - strumHistory[0].t > HISTORY_SECONDS) {
-    strumHistory.shift();
-  }
-
-  let reference = null;
-  for (const entry of strumHistory) {
-    if (now - entry.t <= WINDOW_SECONDS) {
-      reference = entry;
-      break;
+  async function ensureLandmarker() {
+    try {
+      state.landmarker = await makeLandmarker("GPU");
+    } catch (e) {
+      console.warn("GPU tracking unavailable, trying CPU.", e);
+      state.landmarker = await makeLandmarker("CPU");
     }
   }
 
-  if (reference === null || now - reference.t < MIN_WINDOW_SECONDS) {
-    return;
+  function scheduleFrame() {
+    if (!state.running) return;
+    const cb = (now) => { processFrame(now); scheduleFrame(); };
+    state.frameRequestId = video.requestVideoFrameCallback
+      ? video.requestVideoFrameCallback(cb)
+      : requestAnimationFrame(cb);
   }
 
-  const elapsed = now - reference.t;
-  const vx = (x - reference.x) / elapsed / handSize;
-  const vy = (y - reference.y) / elapsed / handSize;
-  const speed = Math.hypot(vx, vy);
+  function processFrame(frameTime) {
+    if (!state.running || !state.landmarker || video.readyState < 2) return;
+    if (video.currentTime === state.lastVideoTime) return;
+    state.lastVideoTime = video.currentTime;
 
-  // A jump this fast is a tracking glitch, not a real movement.
-  if (speed > MAX_SPEED) {
-    resetStrum();
-    return;
-  }
-
-  const sensitivity = Number($('sensitivity').value);
-  const startSpeed = 4.2 - 0.4 * sensitivity;
-  const resetSpeed = startSpeed * 0.4;
-
-  if (!strumArmed) {
-    if (speed < resetSpeed) {
-      if (slowSince === null) {
-        slowSince = now;
-      } else if (now - slowSince >= SLOW_HOLD_SECONDS) {
-        strumArmed = true;
-      }
-    } else {
-      slowSince = null;
-    }
-
-    const reversed =
-      strumDirection !== null &&
-      speed > resetSpeed &&
-      (vx * strumDirection[0] + vy * strumDirection[1]) / speed < -0.3;
-
-    if (reversed) {
-      strumArmed = true;
-    }
-  }
-
-  if (
-    strumArmed &&
-    selectedChord !== null &&
-    speed > startSpeed &&
-    now - lastStrumTime > STRUM_COOLDOWN
-  ) {
-    playChord(selectedChord);
-    lastStrumTime = now;
-    strumArmed = false;
-    strumDirection = [vx / speed, vy / speed];
-    slowSince = null;
-  }
-}
-
-// ----- Main webcam loop -----
-
-const video_ = video;
-
-function loop() {
-  if (!running) {
-    return;
-  }
-
-  // Only analyze when the camera has produced a new frame.
-  if (
-    video_.readyState >= 2 &&
-    video_.videoWidth > 0 &&
-    video_.currentTime !== lastVideoTime
-  ) {
-    lastVideoTime = video_.currentTime;
-
-    const width = video_.videoWidth;
-    const height = video_.videoHeight;
-
+    const canvas = ui.canvas;
+    const ctx = canvas.getContext("2d");
+    const width = video.videoWidth, height = video.videoHeight;
+    if (!width || !height) return;
     if (canvas.width !== width || canvas.height !== height) {
       canvas.width = width;
       canvas.height = height;
     }
 
-    ctx.save();
-    ctx.translate(width, 0);
-    ctx.scale(-1, 1);
-    ctx.drawImage(video_, 0, 0, width, height);
-    ctx.restore();
+    const timestamp = Math.max(Math.round(frameTime), state.lastTimestamp + 1);
+    state.lastTimestamp = timestamp;
 
+    let result;
     try {
-      const now = performance.now() / 1000;
-      const result = landmarker.detectForVideo(canvas, performance.now());
-      const hands = {};
-      const scores = {};
-
-      result.landmarks.forEach(function (landmarks, handIndex) {
-        const category = result.handedness[handIndex][0];
-        const label = category.categoryName;
-
-        // If both hands get the same label, keep the more confident one.
-        if (hands[label] === undefined || category.score > scores[label]) {
-          hands[label] = landmarks;
-          scores[label] = category.score;
-        }
-
-        const points = landmarks.map(function (p) {
-          return [p.x * width, p.y * height];
-        });
-
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = '#00ff00';
-        for (const connection of mediapipe.HandLandmarker.HAND_CONNECTIONS) {
-          ctx.beginPath();
-          ctx.moveTo(points[connection.start][0], points[connection.start][1]);
-          ctx.lineTo(points[connection.end][0], points[connection.end][1]);
-          ctx.stroke();
-        }
-
-        ctx.fillStyle = '#ff0000';
-        for (const point of points) {
-          ctx.beginPath();
-          ctx.arc(point[0], point[1], 5, 0, Math.PI * 2);
-          ctx.fill();
-        }
-
-        ctx.fillStyle = '#4da3ff';
-        ctx.font = 'bold 20px system-ui, sans-serif';
-        ctx.fillText(label, points[0][0], points[0][1] - 15);
-      });
-
-      $('handCount').textContent = result.landmarks.length;
-
-      const fretLabel = $('fretHand').value;
-      const strumLabel = $('strumHand').value;
-
-      if (hands[fretLabel] && fretLabel !== strumLabel) {
-        updateChord(chooseChord(detectBentFingers(hands[fretLabel])));
-      } else if (!hands[fretLabel]) {
-        updateChord(null);
-      }
-
-      $('chordName').textContent = selectedChord !== null ? selectedChord : 'none';
-
-      if (hands[strumLabel]) {
-        handleStrum(hands[strumLabel], now, width, height);
-      } else if (now - lastStrumSeen > HAND_LOST_RESET_SECONDS) {
-        resetStrum();
-      }
-    } catch (error) {
-      console.error(error);
-    }
-  }
-
-  requestAnimationFrame(loop);
-}
-
-function stopCamera() {
-  running = false;
-
-  if (cameraStream !== null) {
-    cameraStream.getTracks().forEach(function (track) {
-      track.stop();
-    });
-  }
-
-  cameraStream = null;
-  video.srcObject = null;
-  lastVideoTime = -1;
-  resetChord();
-  resetStrum();
-
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  $('videoEmpty').hidden = false;
-  $('cameraButton').textContent = 'Start camera';
-  $('handCount').textContent = '0';
-  $('chordName').textContent = 'none';
-}
-
-function cameraError(message) {
-  stopCamera();
-  $('emptyText').textContent = message;
-}
-
-$('cameraButton').addEventListener('click', async function () {
-  if (cameraStream !== null) {
-    stopCamera();
-    return;
-  }
-
-  if (audioContext === null || buffers.size === 0) {
-    $('emptyText').textContent = 'Load the guitar samples first.';
-    return;
-  }
-
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    $('emptyText').textContent = 'The camera needs localhost or https. Do not open the file directly.';
-    return;
-  }
-
-  $('emptyText').textContent = 'Requesting camera…';
-
-  try {
-    await audioContext.resume();
-
-    cameraStream = await navigator.mediaDevices.getUserMedia({
-      video: { width: 640, height: 480 },
-      audio: false
-    });
-
-    video.srcObject = cameraStream;
-    await video.play();
-  } catch (error) {
-    console.error(error);
-
-    if (error.name === 'NotAllowedError') {
-      cameraError('Camera blocked. Allow it from the address bar and try again.');
-    } else if (error.name === 'NotFoundError') {
-      cameraError('No camera found.');
-    } else if (error.name === 'NotReadableError') {
-      cameraError('Another app is using the camera.');
-    } else {
-      cameraError('Camera error: ' + error.name);
-    }
-    return;
-  }
-
-  try {
-    $('emptyText').textContent = 'Loading hand tracking…';
-    await loadTracker();
-
-    if (cameraStream === null) {
+      result = state.landmarker.detectForVideo(video, timestamp);
+    } catch (_) {
       return;
     }
 
-    $('videoEmpty').hidden = true;
-    $('cameraButton').textContent = 'Stop camera';
-    lastVideoTime = -1;
-    resetChord();
-    resetStrum();
-    running = true;
-    loop();
-  } catch (error) {
-    console.error(error);
-    cameraError('Hand tracker failed to load. Check your connection.');
+    drawHands(ctx, canvas, result);
+    processHands(result, frameTime || performance.now(), width, height);
   }
-});
 
-tryHostedSamples();
+  // Camera Start / Stop
+  async function startCamera() {
+    if (state.running) return;
+    try {
+      // 1. Initialize & resume AudioContext (requires user gesture — this IS the gesture)
+      const audio = ensureAudio();
+      await audio.resume();
+
+      // 2. Load all audio samples now that context is running
+      if (state.chordBuffers.size === 0) {
+        await preloadAllSamples();
+      }
+
+      setStatus("Starting camera…");
+
+      state.stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 60 } },
+      });
+      video.srcObject = state.stream;
+      await video.play();
+      await ensureLandmarker();
+
+      state.running = true;
+      state.lastVideoTime = -1;
+      state.lastTimestamp = 0;
+      if (ui.cameraButton) {
+        ui.cameraButton.textContent = "Stop camera";
+        ui.cameraButton.classList.replace("btn-start", "btn-stop");
+      }
+      if (ui.empty) ui.empty.hidden = true;
+      setStatus("Ready");
+      scheduleFrame();
+    } catch (err) {
+      console.error(err);
+      await stopCamera();
+      setStatus("Error");
+    }
+  }
+
+  async function stopCamera() {
+    state.running = false;
+    if (state.frameRequestId !== null) {
+      if (video.cancelVideoFrameCallback) video.cancelVideoFrameCallback(state.frameRequestId);
+      else cancelAnimationFrame(state.frameRequestId);
+    }
+    state.frameRequestId = null;
+
+    if (state.stream) {
+      for (const track of state.stream.getTracks()) track.stop();
+      state.stream = null;
+    }
+    video.srcObject = null;
+    try { state.landmarker?.close(); } catch (_) {}
+    state.landmarker = null;
+    lastPy = null;
+    lastTime = null;
+    smoothedVy = 0;
+    strumPhase = "neutral";
+
+    if (ui.cameraButton) {
+      ui.cameraButton.textContent = "Start camera";
+      ui.cameraButton.classList.replace("btn-stop", "btn-start");
+    }
+    if (ui.empty) ui.empty.hidden = false;
+    if (ui.handCount) ui.handCount.textContent = "0";
+    setStatus("Ready");
+  }
+
+  ui.cameraButton?.addEventListener("click", () => {
+    if (state.running) void stopCamera();
+    else void startCamera();
+  });
+
+  // Keyboard controls for easy testing
+  let keyDir = "down";
+  window.addEventListener("keydown", (e) => {
+    if (e.target.tagName === "INPUT") return;
+    if (e.code === "ArrowDown") {
+      e.preventDefault();
+      playChord("down", 8.0);
+    } else if (e.code === "ArrowUp") {
+      e.preventDefault();
+      playChord("up", 8.0);
+    } else if (e.code === "Space") {
+      e.preventDefault();
+      playChord(keyDir, 7.5);
+      keyDir = keyDir === "down" ? "up" : "down";
+    } else if (e.key >= "1" && e.key <= "9") {
+      const chord = CHORD_NAMES[Number(e.key) - 1];
+      if (chord) changeChord(chord, true);
+    }
+  });
+
+  // Autoplay unlock
+  const unlockAudio = () => {
+    ensureAudio();
+    if (state.audio?.state === "suspended") state.audio.resume();
+    window.removeEventListener("pointerdown", unlockAudio);
+    window.removeEventListener("keydown", unlockAudio);
+  };
+  window.addEventListener("pointerdown", unlockAudio, { passive: true });
+  window.addEventListener("keydown", unlockAudio, { passive: true });
+
+  // Init — do NOT preload audio here; browser autoplay policy requires a user gesture first
+  updateChordUI("A");
+  window.addEventListener("beforeunload", () => { void stopCamera(); });
+})();
